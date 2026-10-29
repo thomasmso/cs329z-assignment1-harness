@@ -145,7 +145,9 @@ def run_email_qa(
       contain an accepted answer, and the ``support`` of every correct
       answer includes at least one gold email.
     """
-    raise NotImplementedError
+    from cs329z_hw1.pipelines.email_qa import answer_question
+
+    return answer_question(question, search, lm)
 
 
 # ======================================================================
