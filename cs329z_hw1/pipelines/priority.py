@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 
 from cs329z_hw1.data import REPO_ROOT
+from cs329z_hw1.email_utils import format_email
 from cs329z_hw1.llm import OutputTruncated
 from cs329z_hw1.types import Email, LMCallable
 
@@ -54,37 +54,6 @@ _STRICT_REASON = re.compile(r"\breason\s*[:=]\s*[*\"'`]*\s*(.+)", re.IGNORECASE)
 _JSON_REASON = re.compile(r"\"reason\"\s*:\s*\"([^\"]+)\"", re.IGNORECASE)
 
 
-def format_email(email: Email) -> str:
-    """The user message: headers the rubric depends on, then the email itself."""
-    recipients = email.get("to") or []
-    listed = ", ".join(recipients)
-    to_line = (
-        f"{listed} ({len(recipients)} recipient{'s' if len(recipients) != 1 else ''})"
-        if recipients
-        else "(none listed)"
-    )
-
-    body = email.get("body") or ""
-
-    return (
-        f"From: {email.get('from') or '(unknown)'}\n"
-        f"To: {to_line}\n"
-        f"Date: {_format_date(email.get('date') or '')}\n"
-        f"Subject: {email.get('subject') or '(no subject)'}\n"
-        f"\n{body.strip() or '(empty body)'}"
-    )
-
-
-def _format_date(date: str) -> str:
-    """'2001-06-22T16:56:37Z' -> 'Friday 2001-06-22 16:56 UTC', so the model can count working days."""
-    try:
-        return datetime.fromisoformat(date.replace("Z", "+00:00")).strftime(
-            "%A %Y-%m-%d %H:%M UTC"
-        )
-    except ValueError:
-        return date or "(unknown)"
-
-
 def parse_reply(text: str) -> dict:
     """Pull a label and a reason out of any reply. Never raises.
 
@@ -123,5 +92,5 @@ def classify_priority(email: Email, lm: LMCallable) -> dict:
         reply = exc.text or ""
     except Exception as exc:
         return {"category": "unknown", "reason": f"The model call failed: {exc}"}
-    print(reply)
+
     return parse_reply(reply)
