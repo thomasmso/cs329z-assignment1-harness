@@ -193,7 +193,9 @@ def run_render_tools(schemas: list[dict]) -> str:
     this text, the model must write a correct call for at least 18 of the 20
     requests in tests/fixtures/agent_protocol_requests.json.
     """
-    raise NotImplementedError
+    from cs329z_hw1.agent.tool_protocol import render_tools
+
+    return render_tools(schemas)
 
 
 def run_parse_response(text: str) -> ParsedResponse:
@@ -213,7 +215,9 @@ def run_parse_response(text: str) -> ParsedResponse:
       is exactly the original call, never a different one. If the cut is
       inside the arguments, ``tool_call`` is None and ``error`` is set.
     """
-    raise NotImplementedError
+    from cs329z_hw1.agent.tool_protocol import parse_response
+
+    return parse_response(text)
 
 
 def run_format_tool_call(text: str, call: ToolCall) -> str:
@@ -232,7 +236,9 @@ def run_format_tool_call(text: str, call: ToolCall) -> str:
       complete call in your own format.
     * ``call`` is not modified.
     """
-    raise NotImplementedError
+    from cs329z_hw1.agent.tool_protocol import format_tool_call
+
+    return format_tool_call(text, call)
 
 
 def run_agent_session(
