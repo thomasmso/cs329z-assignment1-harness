@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from jsonschema import Draft202012Validator
 
-from cs329z_hw1.types import ToolResult, ToolSpec
+from cs329z_hw1.types import Status, ToolResult, ToolSpec
+
+# Constants to easily be used elsewhere in project
+UNKNOWN_TOOL: Status = "unknown_tool"
+INVALID_ARGS: Status = "invalid_args"
 
 
 class ToolRegistry:
@@ -34,14 +38,14 @@ class ToolRegistry:
         raises. Use jsonschema.Draft202012Validator for the check.
         """
         if name not in self.tools:
-            return ToolResult("unknown_tool", f"There is no tool named {name!r}.")
+            return ToolResult(UNKNOWN_TOOL, f"There is no tool named {name!r}.")
 
         validator = Draft202012Validator(self.tools[name].parameters)
         errors = [error.message for error in validator.iter_errors(args)]
         if len(errors) > 0:
             problems = "\n".join(f"- {error}" for error in errors)
             return ToolResult(
-                "invalid_args", f"Invalid arguments for {name!r}:\n{problems}"
+                INVALID_ARGS, f"Invalid arguments for {name!r}:\n{problems}"
             )
 
         return None  # No validation errors, so the call can run.
