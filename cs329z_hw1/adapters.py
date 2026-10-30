@@ -179,7 +179,9 @@ def run_tool_registry(tools: list[ToolSpec]) -> Any:
       ``fn(**args)``: status "ok", ``content == str(return value)``.
     * The registry keeps working after any of these outcomes.
     """
-    raise NotImplementedError
+    from cs329z_hw1.agent.tool_registry import ToolRegistry
+
+    return ToolRegistry(tools)
 
 
 def run_render_tools(schemas: list[dict]) -> str:
