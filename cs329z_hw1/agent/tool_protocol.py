@@ -50,6 +50,8 @@ def render_tools(schemas: list[dict]) -> str:
     Tools with no parameters just take an empty JSON object for "args".
     
     If you do not need to call a tool, just reply with the text you want to say.
+    
+    If you need to call a tool, call it in the same reply and do not announce an action without calling a tool.
     """
 
     # Example
