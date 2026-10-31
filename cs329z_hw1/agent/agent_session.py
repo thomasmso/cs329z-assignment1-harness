@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from cs329z_hw1.agent.cardinal_tools import cardinal_specs
 from cs329z_hw1.agent.tool_protocol import parse_response, render_tools
 from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegistry
 from cs329z_hw1.llm import OutputTruncated
@@ -43,7 +44,7 @@ class AgentSession:
         self.config = config
         self.mode = config.mode
         self.transcript = []
-        self.tool_registry = ToolRegistry(tools if tools else [])
+        self.tool_registry = ToolRegistry(self._select_tools(tools))
 
         self.messages = []
 
@@ -148,6 +149,26 @@ class AgentSession:
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def _select_tools(self, tools: Optional[list[ToolSpec]]) -> list[ToolSpec]:
+        """
+        Return a list of ToolSpecs depending on whether explicit list of tools were provided.
+
+        If None, return the whole Cardinal toolset.
+
+        Explicit lists get ask_user and remember/recall depending on config.
+        """
+        cardinal = cardinal_specs(self.config, self.config.aux_lm or self.lm)
+        if tools is None:
+            return list(cardinal.values())
+
+        selected = list(tools)
+        if self.config.user is not None:
+            selected.append(cardinal["ask_user"])
+        if self.config.memory_dir is not None:
+            selected.extend([cardinal["remember"], cardinal["recall"]])
+
+        return selected
 
     def _add_to_transcript(self, event_type: str, **fields) -> None:
         self.transcript.append({"type": event_type, **fields})

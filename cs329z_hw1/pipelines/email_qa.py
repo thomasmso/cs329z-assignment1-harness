@@ -60,6 +60,8 @@ def answer_question(
     question: str, search: Callable[[str, int], list[Email]], lm: LMCallable
 ) -> dict:
     """
+    `search` is a function that takes a tuple[query, number of results to return], then returns the list of emails.
+
     Performs the search. Model will either answer or provide query for next search.
     Search budget is 3 at most via SEARCH_HOP_BUDGET.
 
