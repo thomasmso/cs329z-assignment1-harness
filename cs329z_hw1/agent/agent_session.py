@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
+import json
+import os
 from typing import Optional
 
 from cs329z_hw1.agent.cardinal_tools import cardinal_specs
@@ -10,6 +13,8 @@ from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegis
 from cs329z_hw1.llm import OutputTruncated
 from cs329z_hw1.tokens import count_message_tokens, count_tokens
 from cs329z_hw1.types import AgentConfig, AgentResult, LMCallable, ToolSpec
+
+_session_numbers = itertools.count(1)
 
 MAX_MALFORMED_REPLIES_IN_A_ROW = 3
 MALFORMED_STATUSES = (UNKNOWN_TOOL, INVALID_ARGS)  # the model's fault, not the tool's
@@ -50,6 +55,9 @@ class AgentSession:
     def __init__(
         self, lm: LMCallable, tools: Optional[list[ToolSpec]], config: AgentConfig
     ) -> None:
+        self.session_number = next(
+            _session_numbers
+        )  # labels printed events (CS329Z_PRINT_EVENTS)
         self.lm = lm
         self.config = config
         self.mode = config.mode
@@ -184,6 +192,11 @@ class AgentSession:
 
     def _add_to_transcript(self, event_type: str, **fields) -> None:
         self.transcript.append({"type": event_type, **fields})
+        if os.environ.get("CS329Z_PRINT_EVENTS"):
+            # sessions of a live test can run in parallel threads, so tag each line with its session
+            print(
+                f"[session {self.session_number}] {event_type}: {json.dumps(fields)[:1000]}"
+            )
 
     def _add_to_messages(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
