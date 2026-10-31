@@ -69,6 +69,8 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
             raise ValueError(
                 f"Failed to find email with id {email_id!r} - are you sure it's valid?"
             )
+
+        # NOTE: long email might blow up context, so might want to return a snippet instead
         return f"Id: {email_id}\n{format_email(email)}"
 
     def email_qa(question: str) -> str:
