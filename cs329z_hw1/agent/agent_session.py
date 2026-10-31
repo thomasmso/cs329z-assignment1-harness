@@ -19,6 +19,7 @@ MALFORMED_STATUSES = (UNKNOWN_TOOL, INVALID_ARGS)  # the model's fault, not the 
 #
 # #5 came from d20 - the model found "... described in the Benefits Summary..." and stopped instead of reading benefits-summary-2026.md
 # #6 came from d17 - "gym membership" matches a doc saying there's no gym. But "fitness" term would've showed up the "wellness" allowance.
+# #7 came from d18 - the model replied "I'll look up Cardinal Energy's reporting instructions." with no tool call, so that was taken as the final answer.
 SYSTEM_PROMPT = """
 You are an assistant for employees of Cardinal Energy. You have access to the company
 email archive, the company documents (policies, guides, specs, announcements), and a terminal.
@@ -29,6 +30,7 @@ email archive, the company documents (policies, guides, specs, announcements), a
 4. To use a tool, call it in the same reply. When you are finished, reply with no tool call.
 5. If a result points to another document or section, look it up before answering.
 6. If a search finds nothing, search again with other words (synonyms, the likely policy name).
+7. Do not reply with what you are going to do next (e.g. "I'll look up Cardinal Energy's reporting instructions"); do it with a tool call instead.
 """
 
 
