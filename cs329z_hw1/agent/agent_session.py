@@ -11,13 +11,41 @@ from cs329z_hw1.agent.cardinal_tools import cardinal_specs
 from cs329z_hw1.agent.tool_protocol import parse_response, render_tools
 from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegistry
 from cs329z_hw1.llm import OutputTruncated
-from cs329z_hw1.tokens import count_message_tokens, count_tokens
+from cs329z_hw1.tokens import CHARS_PER_TOKEN, count_message_tokens, count_tokens
 from cs329z_hw1.types import AgentConfig, AgentResult, LMCallable, ToolSpec
 
 _session_numbers = itertools.count(1)
 
 MAX_MALFORMED_REPLIES_IN_A_ROW = 3
 MALFORMED_STATUSES = (UNKNOWN_TOOL, INVALID_ARGS)  # the model's fault, not the tool's
+COMPACTION_TARGET_FRACTION = 0.5  # compact down to this share of config.context_budget
+TOOL_RESULT_BUDGET_FRACTION = (
+    0.25  # max share of config.context_budget for one tool result
+)
+SUMMARY_MAX_TOKENS = 100  # about 400 characters
+
+SUMMARY_PROMPT = """
+Below is the earlier part of a conversation between an employee of Cardinal Energy and their
+assistant (you are the assistant), and the summary of what came before it.
+
+Write one updated summary of everything so far.
+
+Make sure to include:
+- Numbers, names, and dates (keep exactly as written).
+- Any user asks, constraints or preferences.
+- Facts found.
+- Any doc_id, email_id, file, and where they were found.
+- Any decisions made.
+- Anything left unfinished.
+
+Leave out raw tool output that won't matter later. Write at most {max_words} words.
+
+Summary so far:
+{summary}
+
+Earlier conversation:
+{conversation}
+"""
 
 # Failing a few tests after adding more context via the tools in Problem 10...
 # I gave the agent an identity and what tools it has at its disposal.
@@ -53,6 +81,10 @@ class AgentSession:
     # Controlled Objects
     transcript: list[dict]  # append-only event log
     messages: list[dict]  # conversation lives through sessions as part of the context
+    user_message_index: int  # where the current send's user message is in messages
+
+    # summary of the compacted-away messages, kept at messages[1] if exists
+    summary: str | None
 
     def __init__(
         self, lm: LMCallable, tools: Optional[list[ToolSpec]], config: AgentConfig
@@ -67,6 +99,7 @@ class AgentSession:
         self.tool_registry = ToolRegistry(self._select_tools(tools))
 
         self.messages = []
+        self.summary = None
 
         # Initial system prompt
         self._add_to_messages(
@@ -82,7 +115,10 @@ class AgentSession:
         # Add the user message to the transcript
         self._add_to_transcript("user", content=user_message)
 
-        # Add user message to messages
+        # Add user message to messages (e.g. new "send" to existing convo)
+        self.user_message_index = len(
+            self.messages
+        )  # compaction keeps this user'ss latest message and all after it
         self._add_to_messages("user", user_message)
 
         malformed_replies_in_a_row, turns, message_token_count = 0, 0, 0
@@ -102,6 +138,10 @@ class AgentSession:
                     status="token_budget",
                     transcript=list(self.transcript),
                 )
+            # Check if messages exceed context budget, if so, compact
+            if count_message_tokens(self.messages) > self.config.context_budget:
+                self._compact()
+
             turns += 1
             message_token_count += count_message_tokens(self.messages)
 
@@ -141,15 +181,24 @@ class AgentSession:
                 name, args = parsed.tool_call.name, parsed.tool_call.args
                 self._add_to_transcript("tool_call", name=name, args=args)
                 result = self.tool_registry.execute(name, args)
+
+                # Cut tool results that are too big for the context (solve `test_one_result_larger_than_the_budget` test case)
+                content = result.content
+                max_chars = (
+                    int(self.config.context_budget * TOOL_RESULT_BUDGET_FRACTION)
+                    * CHARS_PER_TOKEN
+                )
+                if len(content) > max_chars:
+                    content = f"{content[:max_chars]}\n...[Result truncated: {len(content) - max_chars} characters left out.]"
                 self._add_to_transcript(
                     "tool_result",
                     name=name,
                     status=result.status,
-                    content=result.content,
+                    content=content,
                 )
                 self._add_to_messages(
                     "user",
-                    f"Result of tool call for {name} has status {result.status} and content: {result.content}",
+                    f"Result of tool call for {name} has status {result.status} and content: {content}",
                 )
                 if result.status not in MALFORMED_STATUSES:
                     malformed_replies_in_a_row = 0
@@ -191,6 +240,86 @@ class AgentSession:
             selected.extend([cardinal["remember"], cardinal["recall"]])
 
         return selected
+
+    def _compact(self) -> None:
+        """
+        Compact `self.messages` such that `count_message_tokens(self.messages) <= config.context_budget`.
+
+        Keeps the system prompt and the current user message. Summaries are written by
+        `config.aux_lm or self.lm`. The transcript is never edited.
+        """
+
+        print(
+            f"Compacting messages from {count_message_tokens(self.messages)} tokens to under {self.config.context_budget} tokens..."
+        )
+
+        # Q: How far to shrink when over budget?
+        # Since we don't want to compact every turn, target a goal of 50% compaction
+
+        # Q: What happens to older messages?
+        # We will drop them (sliding window) first, then see how many tests fail.
+        # Then we will try rolling summary.
+        #  Summary will just be a new message in self.messages from the aux_lm.
+
+        # We want to keep obviously the system prompt, but in additionto that, we want to keep:
+        #    - The current user message and everything after it
+        #    - The latest summary if there is one
+        #
+        # This means we are going to drop first: the oldest messages after the system prompt,
+        # up to the current user message.
+        tokens_before = count_message_tokens(self.messages)
+        target = int(self.config.context_budget * COMPACTION_TARGET_FRACTION)
+        had_summary = self.summary is not None
+        first = 2 if had_summary else 1  # don't drop the summary message itself
+        dropped_messages = []
+        while (
+            self.user_message_index > first
+            and count_message_tokens(self.messages) > target
+        ):
+            dropped_messages.append(self.messages.pop(first))
+            self.user_message_index -= 1
+
+        # Roll the dropped messages into the summary
+        if dropped_messages:
+            self.summary = self._summarize(dropped_messages)
+            summary_message = {
+                "role": "user",
+                "content": f"Summary of the earlier conversation (older messages were removed to save space):\n{self.summary}",
+            }
+            if had_summary:
+                self.messages[1] = summary_message
+            else:
+                self.messages.insert(1, summary_message)
+                self.user_message_index += 1
+
+        self._add_to_transcript(
+            "compaction",
+            dropped=len(dropped_messages),
+            tokens_before=tokens_before,
+            tokens_after=count_message_tokens(self.messages),
+            summary=self.summary,
+        )
+
+        print(f"Compacted messages to {count_message_tokens(self.messages)} tokens.")
+
+    # NOTE: summarizing passed `test_live_constraint_survives_compaction` test
+    def _summarize(self, dropped_messages: list[dict]) -> str:
+        """Ask `config.aux_lm` or `self.lm` to summarize `dropped_messages` to `self.summary`."""
+        conversation = "\n\n".join(
+            f"{m['role']}: {m['content']}" for m in dropped_messages
+        )
+        prompt = SUMMARY_PROMPT.format(
+            summary=self.summary or "(none yet)",
+            conversation=conversation,
+            max_words=SUMMARY_MAX_TOKENS
+            * 3
+            // 4,  # about 0.75 words per token (avg English word is 5chars)
+        )
+        lm_to_use = self.config.aux_lm or self.lm
+        reply = lm_to_use([{"role": "user", "content": prompt}])
+        return reply.strip()[
+            : SUMMARY_MAX_TOKENS * CHARS_PER_TOKEN
+        ]  # ensure reply is within token budget
 
     def _add_to_transcript(self, event_type: str, **fields) -> None:
         self.transcript.append({"type": event_type, **fields})
