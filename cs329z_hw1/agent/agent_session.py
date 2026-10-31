@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from cs329z_hw1.agent.cardinal_tools import cardinal_specs, format_facts, load_facts
+from cs329z_hw1.data import REPO_ROOT
 from cs329z_hw1.agent.tool_protocol import parse_response, render_tools
 from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegistry
 from cs329z_hw1.llm import OutputTruncated
@@ -18,6 +19,15 @@ from cs329z_hw1.tokens import CHARS_PER_TOKEN, count_message_tokens, count_token
 from cs329z_hw1.types import AgentConfig, AgentResult, LMCallable, ToolSpec
 
 _session_numbers = itertools.count(1)
+
+# With CS329Z_SAVE_EVENTS set (conftest.py sets it for live tests), each session's events go to
+# runs/events/<run start, UTC>/<test name>/session-<n>.jsonl (one folder per pytest run)
+_EVENTS_RUN_DIR = (
+    REPO_ROOT
+    / "runs"
+    / "events"
+    / datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+)
 
 MAX_MALFORMED_REPLIES_IN_A_ROW = 3
 MALFORMED_STATUSES = (UNKNOWN_TOOL, INVALID_ARGS)  # the model's fault, not the tool's
@@ -105,6 +115,7 @@ class AgentSession:
         self.config = config
         self.mode = config.mode
         self.transcript = []
+        self.events_path = self._events_path()
         self.tool_registry = ToolRegistry(self._select_tools(tools))
 
         self.messages = []
@@ -334,8 +345,25 @@ class AgentSession:
             : SUMMARY_MAX_TOKENS * CHARS_PER_TOKEN
         ]  # ensure reply is within token budget
 
+    def _events_path(self) -> Optional[Path]:
+        """Where this session's events are saved, or None unless CS329Z_SAVE_EVENTS is set."""
+        if not os.environ.get("CS329Z_SAVE_EVENTS"):
+            return None
+        # e.g. "tests/test_memory.py::test_live_paired_sessions (call)" -> "test_memory.py__test_live_paired_sessions"
+        test = (
+            os.environ.get("PYTEST_CURRENT_TEST", "no-test")
+            .split(" ")[0]
+            .split("/")[-1]
+        )
+        folder = _EVENTS_RUN_DIR / re.sub(r"[^\w.-]+", "_", test)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"session-{self.session_number}.jsonl"
+
     def _add_to_transcript(self, event_type: str, **fields) -> None:
         self.transcript.append({"type": event_type, **fields})
+        if self.events_path is not None:
+            with open(self.events_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"type": event_type, **fields}) + "\n")
         if os.environ.get("CS329Z_PRINT_EVENTS"):
             # sessions of a live test can run in parallel threads, so tag each line with its session
             print(
