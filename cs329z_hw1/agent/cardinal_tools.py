@@ -6,6 +6,7 @@ import functools
 import json
 
 from cs329z_hw1 import data
+from cs329z_hw1.agent import doc_index
 from cs329z_hw1.cardinal import cardinal_spec
 from cs329z_hw1.email_utils import format_email
 from cs329z_hw1.pipelines import digest
@@ -86,10 +87,21 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
 
     # Problem 9 (search_docs)
     def search_docs(query: str, k: int = 5) -> str:
-        raise NotImplementedError("search_docs is not implemented yet")
+        # 24 docs, tokens per doc = 1,100 median with 7,000 max,
+        # median 72 lines per doc, 272 max. median 6 tokens per line, 95th percentile 77, max 129
+        #
+        # NOTE: Decision Decisions made:
+        # 1. index whole doc vs one line vs window of several lines - obvious tradeoffs
+        #      - whole doc can blow up context, one line might not be enough, several (3-5?) is sweet spot
+        # 2. Including title line of doc snippet for extra context
+        #      - adds top-level context as to the snippet
+        results = doc_index.search_docs(doc_index.doc_index(), query, k)
+        return json.dumps(results, indent=2)
 
     def read_doc(doc_id: str, start_line: int = 1) -> str:
-        raise NotImplementedError("read_doc is not implemented yet")
+        window = doc_index.read_doc(doc_index.doc_index(), doc_id, start_line)
+        header = f"{doc_id}, lines {window['start_line']}-{window['end_line']} of {window['total_lines']}"
+        return f"{header}\n{window['text']}"
 
     # Problem 10 (terminal)
     def run_terminal(cmd: str) -> str:
@@ -132,8 +144,20 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
                 "(date as YYYY-MM-DD).",
                 daily_digest,
             ),
-            cardinal_spec("search_docs", "TODO", search_docs),
-            cardinal_spec("read_doc", "TODO", read_doc),
+            cardinal_spec(
+                "search_docs",
+                "Keyword search over the company documents (policies, guides, specs, "
+                "announcements). Returns the k best-matching passages with their doc_id, title, "
+                "a short snippet, and the lines they come from.",
+                search_docs,
+            ),
+            cardinal_spec(
+                "read_doc",
+                "Read a document by doc_id, starting at start_line. Returns a window of lines "
+                "and says which lines it covers; read again from the line after the last to "
+                "continue.",
+                read_doc,
+            ),
             cardinal_spec("run_terminal", "TODO", run_terminal),
             cardinal_spec("remember", "TODO", remember),
             cardinal_spec("recall", "TODO", recall),
