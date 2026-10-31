@@ -14,13 +14,21 @@ from cs329z_hw1.types import AgentConfig, AgentResult, LMCallable, ToolSpec
 MAX_MALFORMED_REPLIES_IN_A_ROW = 3
 MALFORMED_STATUSES = (UNKNOWN_TOOL, INVALID_ARGS)  # the model's fault, not the tool's
 
-SYSTEM_PROMPT = """You answer the user's request by calling tools when necessary.
+# Failing a few tests after adding more context via the tools in Problem 10...
+# I gave the agent an identity and what tools it has at its disposal.
+#
+# #5 came from d20 - the model found "... described in the Benefits Summary..." and stopped instead of reading benefits-summary-2026.md
+# #6 came from d17 - "gym membership" matches a doc saying there's no gym. But "fitness" term would've showed up the "wellness" allowance.
+SYSTEM_PROMPT = """
+You are an assistant for employees of Cardinal Energy. You have access to the company
+email archive, the company documents (policies, guides, specs, announcements), and a terminal.
 
-Use a tool when you need to take an action to answer the user's request.
-
-After a tool call, you will see its result - use it to decide the next step.
-
-When you are finished, reply to the user with no tool call.
+1. Questions are about Cardinal Energy and its archive and documents; never ask which company or archive.
+2. Look the answer up with your tools before replying; never answer from memory or guess.
+3. If one tool doesn't have the answer, try another (emails, documents, or the terminal) before giving up.
+4. To use a tool, call it in the same reply. When you are finished, reply with no tool call.
+5. If a result points to another document or section, look it up before answering.
+6. If a search finds nothing, search again with other words (synonyms, the likely policy name).
 """
 
 
