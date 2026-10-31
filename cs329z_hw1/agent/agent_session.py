@@ -11,12 +11,19 @@ from pathlib import Path
 from typing import Optional
 
 from cs329z_hw1.agent.cardinal_tools import cardinal_specs, format_facts, load_facts
-from cs329z_hw1.data import REPO_ROOT
 from cs329z_hw1.agent.tool_protocol import parse_response, render_tools
 from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegistry
+from cs329z_hw1.data import REPO_ROOT
 from cs329z_hw1.llm import OutputTruncated
 from cs329z_hw1.tokens import CHARS_PER_TOKEN, count_message_tokens, count_tokens
-from cs329z_hw1.types import AgentConfig, AgentResult, LMCallable, ToolSpec
+from cs329z_hw1.types import (
+    AgentConfig,
+    AgentResult,
+    LMCallable,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+)
 
 _session_numbers = itertools.count(1)
 
@@ -162,6 +169,19 @@ class AgentSession:
                     status="token_budget",
                     transcript=list(self.transcript),
                 )
+
+            # NOW that we know we are not over max_turns and under token budget..
+            #
+            # Steering: poll right before calling model (but before compaction as needed)
+            if self.config.user is not None:
+                steering_message = self.config.user.pending_message()
+                if steering_message is not None:
+                    self._add_to_transcript("user", content=steering_message)
+                    self._add_to_messages(
+                        "user",
+                        f"[Message from the user while you were working]: {steering_message}",
+                    )
+
             # Check if messages exceed context budget, if so, compact
             if count_message_tokens(self.messages) > self.config.context_budget:
                 self._compact()
@@ -210,7 +230,7 @@ class AgentSession:
                 # Else we need to run the tool and log to transcript and messages
                 name, args = parsed.tool_call.name, parsed.tool_call.args
                 self._add_to_transcript("tool_call", name=name, args=args)
-                result = self.tool_registry.execute(name, args)
+                result = self._run_tool(name, args)
 
                 # Cut tool results that are too big for the context (solve `test_one_result_larger_than_the_budget` test case)
                 content = result.content
@@ -253,6 +273,33 @@ class AgentSession:
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def _run_tool(self, name: str, args: dict) -> ToolResult:
+        """
+        Validate the call in registry, ask the user's approval in confirm mode for tools that aren't read-only.
+        """
+        invalid = self.tool_registry.validate(name, args)
+        if invalid is not None:
+            return invalid
+
+        if self.mode == "confirm" and not self.tool_registry.tools[name].read_only:
+            if self.config.user is None:
+                return ToolResult(
+                    "denied", "No user is available to approve this action."
+                )
+            approval = self.config.user.approve(ToolCall(name=name, args=args))
+            if not approval.approved:
+                reason = (
+                    f" Their reason: {approval.reason.strip()}"
+                    if approval.reason.strip()
+                    else " Their reason: none"
+                )
+                return ToolResult(
+                    "denied",
+                    f"The user declined this action.{reason}\nTry another way or ask the user.",
+                )
+
+        return self.tool_registry.execute(name, args)
 
     def _select_tools(self, tools: Optional[list[ToolSpec]]) -> list[ToolSpec]:
         """

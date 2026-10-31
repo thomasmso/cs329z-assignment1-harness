@@ -151,7 +151,6 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
     def daily_digest(date: str) -> str:
         return digest.daily_digest(data.emails_on(date), lm)
 
-    # Problem 9 (search_docs)
     def search_docs(query: str, k: int = 5) -> str:
         # 24 docs, tokens per doc = 1,100 median with 7,000 max,
         # median 72 lines per doc, 272 max. median 6 tokens per line, 95th percentile 77, max 129
@@ -236,9 +235,10 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
         # NOTE: I decided to ignore query and just return whole store (KISS)
         return format_facts(load_facts(config.memory_dir))
 
-    # Problem 13 (interactive)
     def ask_user(question: str) -> str:
-        raise NotImplementedError("ask_user is not implemented yet")
+        if config.user is None:
+            raise ValueError("No user available to answer questions in this session.")
+        return config.user.ask(question)
 
     return {
         spec.name: spec
@@ -311,6 +311,12 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
                 "Can tell what is later via the 'stored_at' field.",
                 recall,
             ),
-            cardinal_spec("ask_user", "TODO", ask_user),
+            cardinal_spec(
+                "ask_user",
+                "Ask the user a question and return their answer. Use it only for information "
+                "only the user knows (which item they mean, a date, a preference). Don't ask for "
+                "anything your tools can find.",
+                ask_user,
+            ),
         ]
     }
