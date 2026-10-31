@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 
 from cs329z_hw1.types import ParsedResponse, ToolCall
 
 TOOL_CALL_START = "<tool_call>"
 TOOL_CALL_END = "</tool_call>"
+
+# The live model sometimes writes the tags with other brackets (eg <|tool_call|>)
+# the JSON inside was right every time, so these are read as the real tags.
+_TAG_SLIPS = re.compile(r"[<\[⟨⟦]\|?\s*(/?)tool_call\s*\|?[>\]⟩⟧]")
 
 _DECODER = json.JSONDecoder()
 
@@ -97,7 +102,7 @@ def parse_response(text: str) -> ParsedResponse:
     """
 
     # Find tool call start index
-    text = text.strip()
+    text = _TAG_SLIPS.sub(r"<\1tool_call>", text).strip()
     tool_call_start_index = text.find(TOOL_CALL_START)
 
     # If no tool call, just return the text
