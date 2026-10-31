@@ -170,6 +170,7 @@ class AgentSession:
             message_token_count += count_message_tokens(self.messages)
 
             # Call the model
+            empty_reply = False
             try:
                 reply = self.lm(self.messages)
             # Handle the model raising OutputTruncated
@@ -186,10 +187,15 @@ class AgentSession:
                 self._add_to_messages("assistant", reply)
                 parsed = parse_response(reply)
                 error = None
+                empty_reply = (
+                    parsed.error is None
+                    and parsed.tool_call is None
+                    and parsed.text == ""
+                )
                 if parsed.error is not None:
                     error = f"Your tool call is invalid due to error: {parsed.error}. Reply again."
-                # handle hiccup case when testing live where model replied with empty string and we thought that was answer... should be considered malformed
-                elif parsed.tool_call is None and parsed.text == "":
+                # handle hiccup case when testing live where model replied with empty string and we thought that was answer...
+                elif empty_reply:
                     error = "Your reply was empty. Reply again with a tool call, or with your final answer."
             if error is None:
                 # No tool call means the model is done
@@ -232,6 +238,9 @@ class AgentSession:
                 # Unreadable reply: log the error and show it to the model
                 self._add_to_transcript("error", content=error)
                 self._add_to_messages("user", error)
+                # Don't considere an empty reply as malformed (since that gives us 3), we're still bounded by max_turns
+                if empty_reply:
+                    continue
                 # handle malformed statuses below...
 
             malformed_replies_in_a_row += 1
