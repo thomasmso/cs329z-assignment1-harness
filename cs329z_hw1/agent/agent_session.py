@@ -114,8 +114,7 @@ class AgentSession:
                     error = f"Your tool call is invalid due to error: {parsed.error}. Reply again."
                 # handle hiccup case when testing live where model replied with empty string and we thought that was answer... should be considered malformed
                 elif parsed.tool_call is None and parsed.text == "":
-                    error = "Your reply was empty. Reply again."
-
+                    error = "Your reply was empty. Reply again with a tool call, or with your final answer."
             if error is None:
                 # No tool call means the model is done
                 if parsed.tool_call is None:
