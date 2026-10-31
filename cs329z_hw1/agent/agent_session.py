@@ -5,9 +5,12 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-from cs329z_hw1.agent.cardinal_tools import cardinal_specs
+from cs329z_hw1.agent.cardinal_tools import cardinal_specs, format_facts, load_facts
 from cs329z_hw1.agent.tool_protocol import parse_response, render_tools
 from cs329z_hw1.agent.tool_registry import INVALID_ARGS, UNKNOWN_TOOL, ToolRegistry
 from cs329z_hw1.llm import OutputTruncated
@@ -59,13 +62,19 @@ You are an assistant for employees of Cardinal Energy. You have access to the co
 email archive, the company documents (policies, guides, specs, announcements), and a terminal.
 
 1. Questions are about Cardinal Energy and its archive and documents; never ask which company or archive.
-2. Look the answer up with your tools before replying; never answer from memory or guess.
+2. Look the answer up with your tools before replying; never answer from your own knowledge or guess.
 3. If one tool doesn't have the answer, try another (emails, documents, or the terminal) before giving up.
 4. To use a tool, call it in the same reply. When you are finished, reply with no tool call.
 5. If a result points to another document or section, look it up before answering.
 6. If a search finds nothing, search again with other words (synonyms, the likely policy name).
 7. Do not reply with what you are going to do next (e.g. "I'll look up Cardinal Energy's reporting instructions"); do it with a tool call instead.
 8. Never say you can't access the archive or documents: emails.jsonl and docs/ are in your terminal's workspace, and the search tools cover both.
+"""
+
+MEMORY_PROMPT = """
+Memory: when the user tells you a lasting fact about themselves or a preference (their team, role,
+codes, what they mean by a term), call the remember tool to store it, even if they don't ask you to.
+Facts stored about the user in earlier conversations (oldest first; if two conflict, the later one is correct):
 """
 
 
@@ -101,9 +110,13 @@ class AgentSession:
         self.messages = []
         self.summary = None
 
-        # Initial system prompt
+        # Initial system prompt, with every stored fact when memory is on
+        system_prompt = SYSTEM_PROMPT
+        if self.config.memory_dir is not None:
+            facts = format_facts(load_facts(self.config.memory_dir))
+            system_prompt += f"{MEMORY_PROMPT}{facts}\n"
         self._add_to_messages(
-            "system", f"{SYSTEM_PROMPT}\n\n{render_tools(self.tool_registry.schemas())}"
+            "system", f"{system_prompt}\n\n{render_tools(self.tool_registry.schemas())}"
         )
 
     def send(self, user_message: str) -> AgentResult:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cs329z_hw1 import data, sandbox
@@ -19,6 +20,32 @@ from cs329z_hw1.types import AgentConfig, Email, LMCallable, ToolSpec
 STREAM_BUDGET_FRACTION = (
     0.1  # share of config.context_budget for each of stdout and stderr
 )
+
+# via `config.memory_dir/facts.jsonl`, one {"fact", "stored_at"} per line
+# will have be in format:
+#
+# { "fact": "fact_content", "stored_at": "2026-10-31T12:00:00Z" }
+MEMORY_FILE = "facts.jsonl"
+
+
+def load_facts(memory_dir: Path | None) -> list[str]:
+    """The facts stored under ``memory_dir``, oldest first; ``[]`` if there are none."""
+    if memory_dir is None:
+        return []
+    path = Path(memory_dir) / MEMORY_FILE
+    if not path.exists():
+        return []
+    facts = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            facts.append(json.loads(line)["fact"])
+    return facts
+
+
+def format_facts(facts: list[str]) -> str:
+    if not facts:
+        return "No facts stored."
+    return "\n".join(f"- {fact}" for fact in facts)
 
 
 @functools.cache
@@ -192,12 +219,22 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
 
         return shown
 
-    # Problem 12 (memory)
     def remember(fact: str) -> str:
-        raise NotImplementedError("remember is not implemented yet")
+        if config.memory_dir is None:
+            raise ValueError("Memory is not available in this session.")
+        memory_dir = Path(config.memory_dir)
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "fact": fact,
+            "stored_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        with open(memory_dir / MEMORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+        return f"Stored: {fact}"
 
     def recall(query: str) -> str:
-        raise NotImplementedError("recall is not implemented yet")
+        # NOTE: I decided to ignore query and just return whole store (KISS)
+        return format_facts(load_facts(config.memory_dir))
 
     # Problem 13 (interactive)
     def ask_user(question: str) -> str:
@@ -261,8 +298,19 @@ def cardinal_specs(config: AgentConfig, lm: LMCallable) -> dict[str, ToolSpec]:
                 "file you can grep.",
                 run_terminal,
             ),
-            cardinal_spec("remember", "TODO", remember),
-            cardinal_spec("recall", "TODO", recall),
+            cardinal_spec(
+                "remember",
+                "Store one fact about the user (team, role, preferences, codes, etc) "
+                "so later conversations can use it. Write as a full sentence.",
+                remember,
+            ),
+            cardinal_spec(
+                "recall",
+                "Return every fact stored about the user in this and earlier conversations, "
+                "oldest first. If two facts conflict, the later one is correct. "
+                "Can tell what is later via the 'stored_at' field.",
+                recall,
+            ),
             cardinal_spec("ask_user", "TODO", ask_user),
         ]
     }
