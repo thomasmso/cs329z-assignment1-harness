@@ -107,6 +107,18 @@ def parse_response(text: str) -> ParsedResponse:
 
     # If no tool call, just return the text
     if tool_call_start_index == -1:
+        # The live model sometimes drops the tags and sends only the JSON (or only the args).
+        # NOTE: this assumes no task wants a pure-JSON final answer, but irl would probably want to be more dynamic
+        if text.startswith("{"):
+            try:
+                untagged = _DECODER.raw_decode(text)[0]
+            except (ValueError, RecursionError):
+                untagged = None
+            if isinstance(untagged, dict):
+                return ParsedResponse(
+                    text="",
+                    error=f'the tool call is missing its tags; write it as {TOOL_CALL_START}{{"name": ..., "args": {{...}}}}{TOOL_CALL_END}.',
+                )
         return ParsedResponse(text=text)
 
     # Get text before tool call block
