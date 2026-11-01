@@ -27,8 +27,10 @@ from cs329z_hw1.types import (
 
 _session_numbers = itertools.count(1)
 
-# With CS329Z_SAVE_EVENTS set (conftest.py sets it for live tests), each session's events go to
+# With SAVE_EVENTS on, each session's events go to
 # runs/events/<run start, UTC>/<test name>/session-<n>.jsonl (one folder per pytest run)
+SAVE_EVENTS = True
+PRINT_EVENTS = True  # print each event to stdout as it happens
 _EVENTS_RUN_DIR = (
     REPO_ROOT
     / "runs"
@@ -119,7 +121,7 @@ class AgentSession:
     ) -> None:
         self.session_number = next(
             _session_numbers
-        )  # labels printed events (CS329Z_PRINT_EVENTS)
+        )  # labels printed events (PRINT_EVENTS)
         self.lm = lm
         self.config = config
         self.mode = config.mode
@@ -412,8 +414,8 @@ class AgentSession:
         ]  # ensure reply is within token budget
 
     def _events_path(self) -> Optional[Path]:
-        """Where this session's events are saved, or None unless CS329Z_SAVE_EVENTS is set."""
-        if not os.environ.get("CS329Z_SAVE_EVENTS"):
+        """Where this session's events are saved, or None unless SAVE_EVENTS is on."""
+        if not SAVE_EVENTS:
             return None
         # e.g. "tests/test_memory.py::test_live_paired_sessions (call)" -> "test_memory.py__test_live_paired_sessions"
         test = (
@@ -430,11 +432,18 @@ class AgentSession:
         if self.events_path is not None:
             with open(self.events_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"type": event_type, **fields}) + "\n")
-        if os.environ.get("CS329Z_PRINT_EVENTS"):
-            # sessions of a live test can run in parallel threads, so tag each line with its session
-            print(
-                f"[session {self.session_number}] {event_type}: {json.dumps(fields)[:1000]}"
-            )
+        if PRINT_EVENTS:
+            # sessions of a live test can run in parallel threads, so tag each event with its
+            # session and print it in one call so its lines stay together
+            lines = [f"[session {self.session_number}] {event_type}"]
+            for key, value in fields.items():
+                text = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False)
+                )
+                lines.append(f"  {key}: " + text[:1000].replace("\n", "\n    "))
+            print("\n".join(lines) + "\n")
 
     def _add_to_messages(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
